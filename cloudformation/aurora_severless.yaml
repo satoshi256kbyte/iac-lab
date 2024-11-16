@@ -1,0 +1,116 @@
+Description:
+  Amazon Aurora Serverless V2
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - 
+        Label:
+          default: Common parameters
+        Parameters:
+          - ServiceName
+          - StageName
+      -
+        Label:
+          default: Database parameters
+        Parameters:
+          - EngineVersion
+          - MinCapacity
+          - MaxCapacity
+          - MasterUsername
+          - MasterUserPassword
+          - DBSubnetList
+          - DBSecurityGroupList
+        
+Parameters:
+  ServiceName:
+    Description: ServiceName name
+    Type: String
+    Default: "iac-experiment"
+  StageName:
+    Description: Stage name
+    Type: String
+    Default: "local"
+    AllowedValues:
+      - local
+      - dev
+      - stg
+      - prod
+  EngineVersion:
+    Type: String
+    AllowedValues:
+      - "16.1"
+      - "16.2"
+      - "16.3"
+      - "16.4"
+    Default: "16.4"
+  MinCapacity:
+    Type: Number
+    Description: The minimum capacity for an Aurora Serverless DB cluster
+    Default: 0.5
+  MaxCapacity:
+    Type: Number
+    Description: The maximum capacity for an Aurora Serverless DB cluster
+    Default: 10
+  MasterUsername:
+    Type: String
+    Description: The master username for the database
+    Default: root
+  MasterUserPassword:
+    Type: String
+    Description: The master password for the database
+    ConstraintDescription: Must contain only alphanumeric characters
+    MinLength: 8
+    MaxLength: 41
+    NoEcho: true
+  DBSubnetList:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: The first subnet for the database
+  DBSecurityGroupList:
+    Type: List<AWS::EC2::SecurityGroup::Id>
+    Description: The security group for the database
+
+Resources:
+
+  DBSubnetGroup: 
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName: !Sub "${ServiceName}-${StageName}-subnet-group-aurora-serverless"
+      DBSubnetGroupDescription: "DB Subnet Group for Aurora Serverless"
+      SubnetIds: !Ref DBSubnetList
+      Tags: 
+        - Key: Name
+          Value: !Sub "${ServiceName}-${StageName}-subnet-group-aurora-serverless"
+        - Key: ServiceName
+          Value: !Ref ServiceName
+        - Key: StageName
+          Value: !Ref StageName
+
+  #----------------------------------------
+  # RDS DB Cluster
+  # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-rds-dbcluster.html
+  #----------------------------------------
+  DBCluster:
+    Type: AWS::RDS::DBCluster
+    Properties:
+      Engine: aurora-postgresql
+      DBClusterIdentifier: !Sub "${ServiceName}-${StageName}-cluster-aurora-serverless"
+      EngineVersion: !Ref EngineVersion
+      MasterUsername: !Ref MasterUsername
+      MasterUserPassword: !Ref MasterUserPassword
+      ServerlessV2ScalingConfiguration:
+        MinCapacity: !Ref MinCapacity
+        MaxCapacity: !Ref MaxCapacity
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VpcSecurityGroupIds: !Ref DBSecurityGroupList
+
+  #----------------------------------------
+  # RDS DB Instance
+  #----------------------------------------
+  DBInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      Engine: aurora-postgresql
+      DBInstanceClass: db.serverless
+      DBClusterIdentifier: !Ref DBCluster
+      DBInstanceIdentifier: !Sub "${ServiceName}-${StageName}-instance-aurora-serverless"

@@ -1,0 +1,160 @@
+Description:
+  Amazon Aurora PostgreSQL Limitless Database
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - 
+        Label:
+          default: Common parameters
+        Parameters:
+          - ServiceName
+          - StageName
+      -
+        Label:
+          default: Database parameters
+        Parameters:
+          - EngineVersion
+          - MinACU
+          - MaxACU
+          - MasterUsername
+          - MasterUserPassword
+          - DBSubnetList
+          - DBSecurityGroupList
+          - ComputeRedundancy
+          - PerformanceInsightsRetentionPeriod
+          - MonitoringInterval
+
+Parameters:
+  ServiceName:
+    Description: ServiceName name
+    Type: String
+    Default: "iac-experiment"
+  StageName:
+    Description: Stage name
+    Type: String
+    Default: "local"
+    AllowedValues:
+      - local
+      - dev
+      - stg
+      - prod
+  EngineVersion:
+    Type: String
+    AllowedValues:
+      - "16.4-limitless"
+    Default: "16.4-limitless"
+  MinACU:
+    Type: Number
+    Description: The minimum acu for the database
+    Default: 16
+  MaxACU:
+    Type: Number
+    Description: The maximum acu for the database
+    Default: 64
+  MasterUsername:
+    Type: String
+    Description: The master username for the database
+    Default: root
+  MasterUserPassword:
+    Type: String
+    Description: The master password for the database
+    ConstraintDescription: Must contain only alphanumeric characters
+    MinLength: 8
+    MaxLength: 41
+    NoEcho: true
+  DBSubnetList:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: The first subnet for the database
+  DBSecurityGroupList:
+    Type: List<AWS::EC2::SecurityGroup::Id>
+    Description: The security group for the database
+  ComputeRedundancy:
+    Type: Number
+    Description: The compute redundancy for the database
+    Default: 0
+    AllowedValues:
+      - 0
+      - 1
+      - 2
+  PerformanceInsightsRetentionPeriod:
+    Type: Number
+    Description: The number of days to retain Performance Insights data
+    Default: 31
+  MonitoringInterval:
+    Type: Number
+    Description: The interval, in seconds, between points when Enhanced Monitoring metrics are collected for the DB cluster
+    Default: 60
+
+Resources:
+
+  DBSubnetGroup: 
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName: !Sub "${ServiceName}-${StageName}-subnet-group-aurora-limitless"
+      DBSubnetGroupDescription: "DB Subnet Group for Aurora Serverless"
+      SubnetIds: !Ref DBSubnetList
+      Tags: 
+        - Key: Name
+          Value: !Sub "${ServiceName}-${StageName}-subnet-group-aurora-limitless"
+        - Key: ServiceName
+          Value: !Ref ServiceName
+        - Key: StageName
+          Value: !Ref StageName
+
+  #----------------------------------------
+  # RDS DB Cluster
+  # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-rds-dbcluster.html
+  #----------------------------------------
+  DBCluster:
+    Type: AWS::RDS::DBCluster
+    Properties:
+      Engine: aurora-postgresql
+      DBClusterIdentifier: !Sub "${ServiceName}-${StageName}-cluster-aurora-limitless"
+      EngineVersion: !Ref EngineVersion
+      MasterUsername: !Ref MasterUsername
+      MasterUserPassword: !Ref MasterUserPassword
+      ClusterScalabilityType: limitless
+      StorageType: aurora-iopt1
+      PerformanceInsightsEnabled: true
+      PerformanceInsightsRetentionPeriod: 31
+      MonitoringInterval: !Ref MonitoringInterval
+      MonitoringRoleArn: !GetAtt MonitoringRole.Arn
+      EnableCloudwatchLogsExports:
+        - postgresql
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VpcSecurityGroupIds: !Ref DBSecurityGroupList
+
+  #----------------------------------------
+  # RDS DB Shard Group
+  # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-rds-dbshardgroup.html
+  #----------------------------------------
+  DBShardGroup:
+    Type: AWS::RDS::DBShardGroup
+    Properties:
+      ComputeRedundancy: !Ref ComputeRedundancy
+      DBClusterIdentifier: !Ref DBCluster
+      DBShardGroupIdentifier: !Sub "${ServiceName}-${StageName}-shard-group-aurora-limitless"
+      MaxACU: !Ref MaxACU
+      MinACU: !Ref MinACU
+      PubliclyAccessible: false
+
+  # -------------------------------------
+  # IAM Role
+  # -------------------------------------
+  MonitoringRole:
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ServiceName}-${StageName}-aurora-limitless-monitoring-role"
+      Path: /service-role/
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: monitoring.rds.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole
